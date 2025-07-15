@@ -1,0 +1,33 @@
+{
+  "status@broadcast": {
+    "2025-05": {
+      "ganhos": [],
+      "gastos": [],
+      "investimentos": []
+    }
+  },
+  "554591539525@c.us": {
+    "2025-05": {
+      "ganhos": [
+        {
+          "valor": 200,
+          "descricao": "sem descrição",
+          "data": "2025-05-12"
+        }
+      ],
+      "gastos": [
+        {
+          "valor": 50,
+          "descricao": "ifood",
+          "data": "2025-05-12"
+        },
+        {
+          "valor": 30,
+          "descricao": "shopping",
+          "data": "2025-05-12"
+        }
+      ],
+      "investimentos": []
+    }
+  }
+}
