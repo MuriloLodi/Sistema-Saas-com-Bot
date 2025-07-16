@@ -1,159 +1,181 @@
+// Módulos
 const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const fs = require('fs');
 const cron = require('node-cron');
+const db = require('./db');
 
 const client = new Client();
-let dadosUsuarios = {};
 
 // Geração do QR Code
 client.on('qr', qr => qrcode.generate(qr, { small: true }));
 
-// Bot pronto
+// Quando o bot estiver pronto
 client.on('ready', () => {
-    console.log('✅ Bot de finanças pronto!');
+  console.log('✅ Bot de finanças pronto!');
 
-    // Enviar resumo diário às 20h
-    cron.schedule('0 20 * * *', () => {
-        const agora = new Date();
-        const mesAtual = agora.toISOString().slice(0, 7);
+  // Envio automático do resumo diário às 20h
+  cron.schedule('0 20 * * *', async () => {
+    console.log('⏰ Executando resumo diário...');
 
-        for (let numero in dadosUsuarios) {
-            const usuario = dadosUsuarios[numero];
-            if (usuario[mesAtual]) {
-                const ganhos = usuario[mesAtual].ganhos.reduce((s, g) => s + g.valor, 0);
-                const gastos = usuario[mesAtual].gastos.reduce((s, g) => s + g.valor, 0);
-                const saldo = ganhos - gastos;
+    db.query('SELECT DISTINCT numero FROM usuarios', async (err, results) => {
+      if (err) return console.error('Erro ao buscar usuários:', err.message);
 
-                const resumo = `📊 *Resumo Financeiro do Dia*\n\n` +
-                    `💰 *Ganhos:* R$ ${ganhos.toFixed(2)}\n` +
-                    `💸 *Gastos:* R$ ${gastos.toFixed(2)}\n` +
-                    `📉 *Saldo:* R$ ${saldo.toFixed(2)}\n` +
-                    `*Não se esqueça de registrar seus novos ganhos ou gastos!`;
-
-                client.sendMessage(numero, resumo);
-            }
-        }
+      for (const usuario of results) {
+        await enviarResumoDiario(usuario.numero);
+      }
     });
+  });
 });
 
-// Ao receber mensagem
+// Receber mensagens do usuário
 client.on('message', async message => {
-    try {
-        // Proteção contra mensagens inválidas
-        if (!message || !message.body) return;
+  if (!message.body) return;
 
-        const texto = message.body.toLowerCase();
-        const numero = message.from;
-        const mesAtual = new Date().toISOString().slice(0, 7);
+  const texto = message.body.toLowerCase();
+  const numero = message.from;
 
-        if (!dadosUsuarios[numero]) dadosUsuarios[numero] = {};
-        if (!dadosUsuarios[numero][mesAtual]) {
-            dadosUsuarios[numero][mesAtual] = { ganhos: [], gastos: [], investimentos: [] };
-        }
+  const usuario_id = await buscarOuCriarUsuario(numero);
 
-        // GANHO
-        if (texto.startsWith('ganhei')) {
-            const { valor, descricao } = interpretarEntrada(texto);
-            dadosUsuarios[numero][mesAtual].ganhos.push({ valor, descricao, data: dataHoje() });
-            salvarEResponder(message, numero, '💰 Ganho registrado!');
-        }
+  if (texto.startsWith('ganhei')) {
+    const { valor, descricao } = interpretarEntrada(texto);
+    db.query('INSERT INTO ganhos (usuario_id, valor, descricao, data) VALUES (?, ?, ?, ?)',
+      [usuario_id, valor, descricao, dataHoje()]);
+    message.reply('💰 Ganho registrado!');
+  }
 
-        // GASTO
-        else if (texto.startsWith('gastei')) {
-            const { valor, descricao } = interpretarEntrada(texto);
-            dadosUsuarios[numero][mesAtual].gastos.push({ valor, descricao, data: dataHoje() });
-            salvarEResponder(message, numero, '💸 Gasto registrado!');
-        }
+  else if (texto.startsWith('gastei')) {
+    const { valor, descricao } = interpretarEntrada(texto);
+    db.query('INSERT INTO gastos (usuario_id, valor, descricao, data) VALUES (?, ?, ?, ?)',
+      [usuario_id, valor, descricao, dataHoje()]);
+    message.reply('💸 Gasto registrado!');
+  }
 
-        // INVESTIMENTO
-        else if (texto.startsWith('investi')) {
-            const { valor, descricao } = interpretarEntrada(texto);
-            dadosUsuarios[numero][mesAtual].investimentos.push({ valor, descricao });
-            salvarEResponder(message, numero, '📈 Investimento registrado!');
-        }
+  else if (texto.startsWith('investi')) {
+    const { valor, descricao } = interpretarEntrada(texto);
+    db.query('INSERT INTO investimentos (usuario_id, valor, descricao) VALUES (?, ?, ?)',
+      [usuario_id, valor, descricao]);
+    message.reply('📈 Investimento registrado!');
+  }
 
-        // RESUMO
-        else if (texto.startsWith('resumo')) {
-            const partes = texto.split(' ');
-            const mes = partes[1] || mesAtual;
-            if (!dadosUsuarios[numero][mes]) return message.reply('⚠️ Nenhum registro encontrado nesse mês.');
-            enviarResumo(message, numero, mes);
-        }
+  else if (texto.startsWith('resumo')) {
+    const partes = texto.split(' ');
+    const mes = partes[1] || dataHoje().slice(0, 7);
+    await enviarResumo(message, usuario_id, mes);
+  }
 
-        // SALDO
-        else if (texto === 'saldo') {
-            const mesDados = dadosUsuarios[numero][mesAtual];
-            const ganhos = mesDados.ganhos.reduce((s, g) => s + g.valor, 0);
-            const gastos = mesDados.gastos.reduce((s, g) => s + g.valor, 0);
-            const saldo = ganhos - gastos;
-            message.reply(`💼 Saldo do mês: R$ ${saldo.toFixed(2)}`);
-        }
+  else if (texto === 'saldo') {
+    const mesAtual = dataHoje().slice(0, 7);
+    const saldo = await calcularSaldo(usuario_id, mesAtual);
+    message.reply(`💼 Saldo do mês: R$ ${saldo.toFixed(2)}`);
+  }
 
-        // BUSCAR
-        else if (texto.startsWith('buscar')) {
-            const termo = texto.replace('buscar', '').trim();
-            const mesDados = dadosUsuarios[numero][mesAtual];
-            const encontrados = mesDados.gastos
-                .filter(g => g.descricao.includes(termo))
-                .map(g => `- R$ ${g.valor.toFixed(2)} - ${g.descricao}`)
-                .join('\n') || 'Nada encontrado.';
-            message.reply(`🔎 Resultados para "${termo}":\n${encontrados}`);
-        }
+  else if (texto.startsWith('ajuda')) {
+    const ajuda = `📘 *Comandos disponíveis:*
 
-        // AJUDA
-        else if (texto === 'ajuda') {
-            const ajuda = `📘 *Comandos disponíveis:*\n\n` +
-                `💰 *Ganhei [valor] [descrição]*\n` +
-                `💸 *Gastei [valor] [descrição]*\n` +
-                `📈 *Investi [valor] [descrição]*\n` +
-                `📊 *Resumo* - Mostra os dados do mês atual\n` +
-                `📅 *Resumo [ano-mês]* - Ex: resumo 2025-05\n` +
-                `💼 *Saldo* - Mostra o saldo do mês\n` +
-                `🔎 *Buscar [termo]* - Ex: buscar mercado\n` +
-                `❓ *Ajuda* - Exibe esta mensagem`;
-            message.reply(ajuda);
-        }
-    } catch (erro) {
-        console.error('❌ Erro ao processar mensagem:', erro.message);
-    }
+💰 *Ganhei [valor] [descrição]*
+💸 *Gastei [valor] [descrição]*
+📈 *Investi [valor] [descrição]*
+📊 *Resumo* - Resumo do mês atual
+📅 *Resumo [ano-mês]* - Ex: resumo 2025-07
+💼 *Saldo* - Mostra o saldo do mês
+❓ *Ajuda* - Lista de comandos`;
+    message.reply(ajuda);
+  }
 });
 
-// Utilitários
+// Funções utilitárias
 function interpretarEntrada(texto) {
-    const partes = texto.split(' ');
-    const valor = parseFloat(partes[1]) || 0;
-    const descricao = partes.slice(2).join(' ') || 'sem descrição';
-    return { valor, descricao };
-}
-
-function salvarEResponder(message, numero, confirmacao) {
-    fs.writeFileSync('dados_usuarios.json', JSON.stringify(dadosUsuarios, null, 2));
-    message.reply(confirmacao);
-    enviarResumo(message, numero, new Date().toISOString().slice(0, 7));
-}
-
-function enviarResumo(message, numero, mes) {
-    const dados = dadosUsuarios[numero][mes];
-    const ganhos = dados.ganhos.reduce((s, g) => s + g.valor, 0);
-    const gastos = dados.gastos.reduce((s, g) => s + g.valor, 0);
-    const investimentos = dados.investimentos.reduce((s, i) => s + parseFloat(i.valor), 0);
-    const saldo = ganhos - gastos;
-
-    const formatar = lista => lista.map(i =>
-        `- R$ ${i.valor.toFixed(2)} - ${i.descricao}`).join('\n') || 'Nenhum.';
-
-    const resumo = `📊 *Resumo Financeiro (${mes})*\n\n` +
-        `💰 *Ganhos:*\n${formatar(dados.ganhos)}\n\n` +
-        `💸 *Gastos:*\n${formatar(dados.gastos)}\n\n` +
-        `📈 *Investimentos:*\n${formatar(dados.investimentos)}\n\n` +
-        `📈 *Totais:*\n+ R$ ${ganhos.toFixed(2)}\n- R$ ${gastos.toFixed(2)}\n= R$ ${saldo.toFixed(2)}\n`;
-
-    message.reply(resumo);
+  const partes = texto.split(' ');
+  const valor = parseFloat(partes[1]) || 0;
+  const descricao = partes.slice(2).join(' ') || 'sem descrição';
+  return { valor, descricao };
 }
 
 function dataHoje() {
-    return new Date().toISOString().split('T')[0];
+  return new Date().toISOString().split('T')[0];
+}
+
+function buscarOuCriarUsuario(numero) {
+  return new Promise((resolve, reject) => {
+    db.query('SELECT id FROM usuarios WHERE numero = ?', [numero], (err, results) => {
+      if (err) return reject(err);
+      if (results.length) return resolve(results[0].id);
+
+      db.query('INSERT INTO usuarios (numero) VALUES (?)', [numero], (err, result) => {
+        if (err) return reject(err);
+        resolve(result.insertId);
+      });
+    });
+  });
+}
+
+async function calcularSaldo(usuario_id, mes) {
+  return new Promise((resolve) => {
+    const mesLike = mes + '%';
+    db.query(`
+      SELECT
+        (SELECT IFNULL(SUM(valor), 0) FROM ganhos WHERE usuario_id = ? AND data LIKE ?) as ganhos,
+        (SELECT IFNULL(SUM(valor), 0) FROM gastos WHERE usuario_id = ? AND data LIKE ?) as gastos
+    `, [usuario_id, mesLike, usuario_id, mesLike], (err, results) => {
+      if (err) return resolve(0);
+      const saldo = results[0].ganhos - results[0].gastos;
+      resolve(saldo);
+    });
+  });
+}
+
+async function enviarResumo(message, usuario_id, mes) {
+  const mesLike = mes + '%';
+  db.query(`
+    SELECT 'ganho' as tipo, valor, descricao FROM ganhos WHERE usuario_id = ? AND data LIKE ?
+    UNION ALL
+    SELECT 'gasto' as tipo, valor, descricao FROM gastos WHERE usuario_id = ? AND data LIKE ?
+    UNION ALL
+    SELECT 'investimento' as tipo, valor, descricao FROM investimentos WHERE usuario_id = ?
+  `, [usuario_id, mesLike, usuario_id, mesLike, usuario_id], (err, results) => {
+    if (err) return message.reply('❌ Erro ao gerar resumo.');
+
+    const ganhos = results.filter(r => r.tipo === 'ganho');
+    const gastos = results.filter(r => r.tipo === 'gasto');
+    const investimentos = results.filter(r => r.tipo === 'investimento');
+
+    const totalGanhos = ganhos.reduce((s, g) => s + g.valor, 0);
+    const totalGastos = gastos.reduce((s, g) => s + g.valor, 0);
+    const totalInvest = investimentos.reduce((s, i) => s + i.valor, 0);
+
+    const formatar = lista => lista.map(i => `- R$ ${i.valor.toFixed(2)} - ${i.descricao}`).join('\n') || 'Nenhum.';
+
+    const resumo = `📊 *Resumo Financeiro (${mes})*
+
+💰 *Ganhos:*
+${formatar(ganhos)}
+
+💸 *Gastos:*
+${formatar(gastos)}
+
+📈 *Investimentos:*
+${formatar(investimentos)}
+
+📈 *Totais:*
++ R$ ${totalGanhos.toFixed(2)}
+- R$ ${totalGastos.toFixed(2)}
+= R$ ${(totalGanhos - totalGastos).toFixed(2)}`;
+
+    message.reply(resumo);
+  });
+}
+
+async function enviarResumoDiario(numero) {
+  try {
+    const usuario_id = await buscarOuCriarUsuario(numero);
+    const saldo = await calcularSaldo(usuario_id, dataHoje().slice(0, 7));
+    const resumo = `📊 *Resumo Diário*
+Saldo acumulado: R$ ${saldo.toFixed(2)}
+Lembre-se de registrar seus ganhos e gastos!`;
+    await client.sendMessage(numero, resumo);
+  } catch (err) {
+    console.error(`❌ Erro ao enviar resumo para ${numero}:`, err.message);
+  }
 }
 
 client.initialize();

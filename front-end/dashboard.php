@@ -1,79 +1,74 @@
 <?php
 require 'inc/auth_check.php';
+require 'inc/db.php';
+
+// Buscar total de usuários
+$totalUsuarios = $pdo->query("SELECT COUNT(*) FROM usuarios")->fetchColumn();
+
+// Buscar totais financeiros
+$totalGanhos = $pdo->query("SELECT IFNULL(SUM(valor), 0) FROM ganhos")->fetchColumn();
+$totalGastos = $pdo->query("SELECT IFNULL(SUM(valor), 0) FROM gastos")->fetchColumn();
+$totalInvest = $pdo->query("SELECT IFNULL(SUM(valor), 0) FROM investimentos")->fetchColumn();
 ?>
 
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Dashboard - SaaS Bot</title>
+  <title>Dashboard Financeiro</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
   <nav class="navbar navbar-dark bg-primary mb-4">
     <div class="container-fluid">
-      <span class="navbar-brand">Bem-vindo, <?= $_SESSION['user_name']; ?></span>
+      <span class="navbar-brand">Dashboard Financeiro</span>
       <a href="auth/logout.php" class="btn btn-light">Sair</a>
     </div>
   </nav>
 
   <div class="container">
-    <h3 class="mb-4">Dashboard de Relatórios</h3>
-
     <div class="row g-3">
-      <div class="col-md-4">
-        <div class="card shadow">
-          <div class="card-body text-center">
-            <h5 class="card-title">Mensagens Enviadas</h5>
-            <p class="card-text display-6">123</p>
-            <a href="#" class="btn btn-primary w-100">Ver Detalhes</a>
+      <div class="col-md-3">
+        <div class="card shadow text-center">
+          <div class="card-body">
+            <h5 class="card-title">Usuários</h5>
+            <p class="display-6"><?= $totalUsuarios; ?></p>
           </div>
         </div>
       </div>
 
-      <div class="col-md-4">
-        <div class="card shadow">
-          <div class="card-body text-center">
-            <h5 class="card-title">Respostas do Bot</h5>
-            <p class="card-text display-6">97</p>
-            <a href="#" class="btn btn-primary w-100">Ver Respostas</a>
+      <div class="col-md-3">
+        <div class="card shadow text-center">
+          <div class="card-body">
+            <h5 class="card-title">Ganhos</h5>
+            <p class="display-6">R$ <?= number_format($totalGanhos, 2, ',', '.'); ?></p>
           </div>
         </div>
       </div>
 
-      <div class="col-md-4">
-        <div class="card shadow">
-          <div class="card-body text-center">
-            <h5 class="card-title">Último Acesso</h5>
-            <p class="card-text display-6"><?= date('d/m/Y H:i'); ?></p>
-            <a href="#" class="btn btn-primary w-100">Ver Histórico</a>
+      <div class="col-md-3">
+        <div class="card shadow text-center">
+          <div class="card-body">
+            <h5 class="card-title">Gastos</h5>
+            <p class="display-6">R$ <?= number_format($totalGastos, 2, ',', '.'); ?></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="card shadow text-center">
+          <div class="card-body">
+            <h5 class="card-title">Investimentos</h5>
+            <p class="display-6">R$ <?= number_format($totalInvest, 2, ',', '.'); ?></p>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="row g-3 mt-3">
-      <div class="col-md-6">
-        <div class="card shadow">
-          <div class="card-body">
-            <h5 class="card-title">Relatório de Atividades</h5>
-            <p class="card-text">Visualize um resumo das suas interações com o bot nos últimos dias.</p>
-            <a href="#" class="btn btn-outline-primary">Acessar Relatório</a>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-6">
-        <div class="card shadow">
-          <div class="card-body">
-            <h5 class="card-title">Estatísticas Gerais</h5>
-            <p class="card-text">Veja gráficos e métricas de uso do sistema.</p>
-            <a href="#" class="btn btn-outline-primary">Ver Estatísticas</a>
-          </div>
-        </div>
-      </div>
+    <div class="mt-4">
+      <a href="relatorio_usuarios.php" class="btn btn-primary">Ver Relatório de Usuários</a>
+      <a href="relatorio_transacoes.php" class="btn btn-success">Ver Relatório de Transações</a>
     </div>
-
   </div>
 </body>
 </html>
